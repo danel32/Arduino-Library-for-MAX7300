@@ -13,7 +13,7 @@
  * - Connect LEDs to pins 8-15 (with appropriate resistors)
  * - Connect buttons to pins 16-19 (with appropriate resistors)
  * 
- * Created by Lovable AI, 2023-04-24
+ * Created by danel32, 2023-04-24
  * Released under MIT License
  */
 
