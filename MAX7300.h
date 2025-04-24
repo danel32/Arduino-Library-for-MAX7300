@@ -14,7 +14,6 @@
  * @license MIT
  */
 
-
 #ifndef MAX7300_h
 #define MAX7300_h
 
@@ -38,6 +37,11 @@
 #define MAX7300_CONFIG_SHUTDOWN   0x00
 #define MAX7300_CONFIG_NORMAL     0x01
 #define MAX7300_CONFIG_TRANSITION_ENABLE 0x02
+
+// Power Management Modes
+#define MAX7300_POWER_NORMAL      0x00
+#define MAX7300_POWER_STANDBY     0x01
+#define MAX7300_POWER_SHUTDOWN    0x02
 
 // Pin Configuration Values
 #define MAX7300_PIN_HIGHZ         0x00 // High-impedance input (default)
@@ -65,9 +69,44 @@
 #define MAX7300_ERR_INVALID_MODE  -4
 #define MAX7300_ERR_NOT_SUPPORTED -5
 #define MAX7300_ERR_TIMEOUT       -6
+#define MAX7300_ERR_EEPROM_FAIL   -7
 
-// Forward declaration for interrupt callback
+// EEPROM storage constants
+#define MAX7300_EEPROM_MAGIC      0xA537  // Magic number to verify config validity
+#define MAX7300_EEPROM_VERSION    0x01    // Configuration version
+#define MAX7300_EEPROM_SIZE       48      // Bytes needed for full configuration
+
+/**
+ * @brief Structure to hold a transition event
+ */
+struct MAX7300Event {
+  uint8_t pin;     // The pin that triggered the event (4-27)
+  uint8_t level;   // Current pin level (0 or 1)
+};
+
+/**
+ * @brief Advanced interrupt callback type with event information
+ */
+typedef void (*MAX7300EventCallback)(MAX7300Event event);
+
+/**
+ * @brief Simple interrupt callback type with changed pins bitmask
+ */
 typedef void (*MAX7300InterruptCallback)(uint32_t changedPins);
+
+/**
+ * @brief Configuration structure for persistent settings
+ */
+struct MAX7300Config {
+  uint16_t magic;                  // Magic number to verify config validity
+  uint8_t version;                 // Configuration version
+  uint8_t powerMode;               // Power management mode
+  uint8_t pinModes[7];             // Pin configuration registers (0x09-0x0F)
+  uint8_t defaultOutputs[28];      // Default output states for each pin
+  uint8_t transitionMask;          // Transition detection mask
+  uint8_t transitionTypes;         // Transition types (high/low)
+  uint8_t checksum;                // Simple checksum for data integrity
+};
 
 class MAX7300 {
   public:
@@ -116,7 +155,7 @@ class MAX7300 {
      * @return true if device is enabled (normal mode), false if disabled (shutdown mode)
      */
     bool isEnabled();
-    
+
     /**
      * Configure a pin's mode (input, output, high-impedance)
      * 
@@ -363,6 +402,107 @@ class MAX7300 {
      */
     const char* getErrorMessage() const;
     
+    /**
+     * @brief Set the power mode of the device
+     * 
+     * @param mode Power mode (MAX7300_POWER_NORMAL, MAX7300_POWER_STANDBY, MAX7300_POWER_SHUTDOWN)
+     * @return Error code (0 for success)
+     */
+    int8_t setPowerMode(uint8_t mode);
+    
+    /**
+     * @brief Get the current power mode of the device
+     * 
+     * @return Current power mode
+     */
+    uint8_t getPowerMode();
+    
+    /**
+     * @brief Enter standby mode (reduced power while maintaining pin states)
+     * This mode preserves pin configuration but reduces power consumption
+     * 
+     * @param preserveOutputs If true, current output states are preserved when returning to normal mode
+     * @return Error code (0 for success)
+     */
+    int8_t standby(bool preserveOutputs = true);
+    
+    /**
+     * @brief Enter shutdown mode (minimum power consumption)
+     * This mode resets all pins to high-impedance inputs and minimizes power
+     * 
+     * @return Error code (0 for success)
+     */
+    int8_t shutdown();
+    
+    /**
+     * @brief Wake the device from standby or shutdown mode
+     * 
+     * @param restoreState If true, restore previous pin states
+     * @return Error code (0 for success)
+     */
+    int8_t wakeup(bool restoreState = true);
+    
+    /**
+     * @brief Get the raw transition flag from the configuration register
+     * This is more efficient than getTransitionEvents() as it only reads one register
+     * 
+     * @return true if transition flag is set, false otherwise
+     */
+    bool getRawTransitionFlag();
+    
+    /**
+     * @brief Set up event-based interrupt handling
+     * This provides more detailed information about the interrupt events
+     * 
+     * @param interruptPin Arduino pin connected to MAX7300 INT output
+     * @param callback Function to call when interrupt occurs
+     * @return Error code (0 for success)
+     */
+    int8_t attachEventInterrupt(uint8_t interruptPin, MAX7300EventCallback callback);
+    
+    /**
+     * @brief Poll for transition events with detailed information
+     * Use this in loop() when not using interrupts
+     * 
+     * @param event Pointer to MAX7300Event structure to fill with event details
+     * @return true if an event was detected, false otherwise
+     */
+    bool pollEvent(MAX7300Event* event);
+    
+    /**
+     * @brief Save current configuration to Arduino EEPROM
+     * 
+     * @param eepromAddress Starting address in EEPROM
+     * @return Error code (0 for success)
+     */
+    int8_t saveConfiguration(uint16_t eepromAddress = 0);
+    
+    /**
+     * @brief Load configuration from Arduino EEPROM
+     * 
+     * @param eepromAddress Starting address in EEPROM
+     * @param applyConfig If true, apply the loaded configuration immediately
+     * @return Error code (0 for success)
+     */
+    int8_t loadConfiguration(uint16_t eepromAddress = 0, bool applyConfig = true);
+    
+    /**
+     * @brief Save current configuration to external EEPROM or flash
+     * 
+     * @param writeCallback Function to call to write data
+     * @return Error code (0 for success)
+     */
+    int8_t saveConfigurationExt(bool (*writeCallback)(uint16_t address, uint8_t* data, uint16_t length));
+    
+    /**
+     * @brief Load configuration from external EEPROM or flash
+     * 
+     * @param readCallback Function to call to read data
+     * @param applyConfig If true, apply the loaded configuration immediately
+     * @return Error code (0 for success)
+     */
+    int8_t loadConfigurationExt(bool (*readCallback)(uint16_t address, uint8_t* data, uint16_t length), bool applyConfig = true);
+    
   private:
     TwoWire *_wire;        // I2C interface
     uint8_t _address;      // I2C address
@@ -372,20 +512,34 @@ class MAX7300 {
     volatile bool _interruptOccurred; // Flag set by ISR
     uint8_t _interruptPin; // Arduino pin for interrupt
     MAX7300InterruptCallback _interruptCallback; // User-provided callback function
+    MAX7300EventCallback _eventCallback;         // Event-based callback function
+    uint8_t _powerMode;    // Current power mode
     
     // Pin configuration cache to reduce I2C traffic
     uint8_t _pinConfigCache[7]; // Cache for config registers 0x09-0x0F
     bool _pinConfigCacheValid;  // Whether the cache is valid
     
+    // Output state cache for power management
+    uint8_t _outputStateCache[MAX7300_TOTAL_PINS]; // Cache for output states
+    bool _outputStateCacheValid;                   // Whether the cache is valid
+
+    // Current configuration structure
+    MAX7300Config _config;  // Current configuration
+    
     // Helper methods
     bool validPin(uint8_t pin);
     bool validMode(uint8_t mode);
     bool validTransitionMode(uint8_t mode);
+    bool validPowerMode(uint8_t mode);
     uint8_t getConfigRegister(uint8_t pin);
     uint8_t getPinShift(uint8_t pin);
     int8_t updatePinConfigCache();
+    int8_t updateOutputStateCache();
     int8_t writePinConfigRegister(uint8_t reg, uint8_t value);
     int8_t setPinMode(uint8_t pin, uint8_t mode, bool updateCache);
+    uint8_t calculateChecksum(uint8_t* data, uint8_t length);
+    int8_t applyConfiguration(const MAX7300Config& config);
+    bool getEventDetails(MAX7300Event* event);
     
     // Static function for interrupt handling
     static void handleInterrupt(void* instance);
