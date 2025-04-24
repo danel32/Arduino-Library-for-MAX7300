@@ -50,7 +50,7 @@ The MAX7300 is a 28-port I²C-interfaced GPIO expander that allows microcontroll
 
 ### Manual Installation
 
-1. Download the [latest release](https://github.com/yourusername/MAX7300)
+1. Download the [latest release](https://github.com/danel32/Arduino-Library-for-MAX7300)
 2. Extract the ZIP file
 3. Copy the folder to your Arduino libraries directory
    - Windows: Documents/Arduino/libraries/
