@@ -626,7 +626,7 @@ Contributions to improve the library are welcome. Please follow these steps:
 
 ## Credits
 
-Library developed by danel32 /eng.to.est@gmail.com/.
+Library developed by danel32 /erbolite@gmail.com/.
 
 ## Version History
 
